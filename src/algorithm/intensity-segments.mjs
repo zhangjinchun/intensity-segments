@@ -1,178 +1,191 @@
-/**
- * Class to manage intensity segments.
- */
+import { RBTree } from 'bintrees';
+
 export class IntensitySegments {
+    // RBTree to store segments with sorted keys
     constructor() {
-        // Array of [start, value] pairs representing segments
-        this.segments = new Map();
+        this.segments = new RBTree((a, b) => a.key - b.key);
     }
 
+    /**
+     * Add an intensity segment from 'from' to 'to' with the specified amount.
+     * @param {number} from start of the range
+     * @param {number} to end of the range (not included)
+     * @param {number} amount intensity value
+     */
     add(from, to, amount) {
-        let keys = this.sortedKeys()
-        if (keys.length == 0) {
-            this.set(from, to, amount)
-            return
+        if (this.segments.size === 0) {
+            this.set(from, to, amount);
+            return;
         }
 
-        let lkeys = keys.length
-        if (to < keys[0] || from > keys[lkeys - 1]) {
-            this.set(from, to, amount)
-            return
+        // If the new segment does not overlap with existing segments, just set it directly
+        if (to < this.getFirstKey() || from > this.getLastKey()) {
+            this.set(from, to, amount);
+            return;
         }
 
-        if (!this.segments.has(to)) {
-            let l = this.getLeftKey(to)
-            this.segments.set(to, this.segments.get(l))
+        // Ensure there is a segment at 'to' by copying the value from the leftmost key less than 'to'
+        if (!this.segments.find({ key: to })) {
+            const l = this.getLeftKey(to);
+            this.segments.insert({ key: to, value: l ? l.value : 0 });
         }
 
-        if (from < keys[0]) {
-            this.segments.set(from, amount)
-        } else if (from == keys[0]) {
-            this.segments.set(from, this.segments.get(from) + amount)
+        // Handle the case where 'from' is less than the first key in the tree
+        if (from < this.getFirstKey()) {
+            this.segments.insert({ key: from, value: amount });
+        } else if (from === this.getFirstKey()) {
+            // If 'from' is equal to the first key, increment its value
+            const node = this.segments.find({ key: from });
+            node.value += amount;
         } else {
-            if (!this.segments.has(from)) {
-                this.segments.set(from, amount)
-                let l = this.getLeftKey(from)
-                if (l != -1) {
-                    this.segments.set(from, this.segments.get(from) + this.segments.get(l))
+            // If 'from' is not already a key in the tree, insert it and adjust its value
+            if (!this.segments.find({ key: from })) {
+                this.segments.insert({ key: from, value: amount });
+                const l = this.getLeftKey(from);
+                if (l) {
+                    const node = this.segments.find({ key: from });
+                    node.value += l.value;
                 }
             } else {
-                this.segments.set(from, this.segments.get(from) + amount)
+                // If 'from' is already a key, just increment its value
+                const node = this.segments.find({ key: from });
+                node.value += amount;
             }
         }
 
-        keys.forEach(k => {
-            if (k > from && k < to) {
-                this.segments.set(k, this.segments.get(k) + amount)
+        // Increment the values of all keys between 'from' and 'to'
+        this.segments.each((node) => {
+            if (node.key > from && node.key < to) {
+                node.value += amount;
             }
-        })
+        });
 
-        this.mergeKeys()
+        // Merge continuous segments that have the same intensity
+        this.mergeKeys();
     }
+
     /**
-     * set a new range(from <-> to, to not included) of intensity based on existing one.
-     * @param {*} from
-     * @param {*} to
-     * @param {*} amount
-     * @returns
+     * Set a new range (from <-> to, to not included) of intensity based on existing one.
+     * @param {number} from start of the range
+     * @param {number} to end of the range (not included)
+     * @param {number} amount intensity value
      */
     set(from, to, amount) {
-        let keys = this.sortedKeys()
-        if (keys.length == 0) {
-            this.segments.set(to, 0)
-            this.segments.set(from, amount)
-            return
+        if (this.segments.size === 0) {
+            this.segments.insert({ key: to, value: 0 });
+            this.segments.insert({ key: from, value: amount });
+            return;
         }
 
-        let lkeys = keys.length
-        if (to < keys[0] || to > keys[lkeys - 1]) {
-            this.segments.set(to, 0)
-        } else if (!this.segments.has(to)) {
-            let l = this.getLeftKey(to)
-            this.segments.set(to, this.segments.get(l))
+        // Ensure there is a segment at 'to' by copying the value from the leftmost key less than 'to'
+        if (to < this.getFirstKey() || to > this.getLastKey()) {
+            this.segments.insert({ key: to, value: 0 });
+        } else if (!this.segments.find({ key: to })) {
+            const l = this.getLeftKey(to);
+            this.segments.insert({ key: to, value: l ? l.value : 0 });
         }
 
-        this.segments.set(from, amount)
+        // Insert the new segment starting at 'from'
+        this.segments.insert({ key: from, value: amount });
 
-        keys = this.sortedKeys()
-        keys.forEach(k => {
-            if (k > from && k < to) {
-                this.segments.delete(k)
+        // Remove any segments within the range (from, to)
+        this.segments.each((node) => {
+            if (node.key > from && node.key < to) {
+                this.segments.remove(node);
             }
-        })
+        });
 
-        this.mergeKeys()
+        // Merge continuous segments that have the same intensity
+        this.mergeKeys();
     }
+
     /**
-     * return the dumped string simply
+     * Return the dumped string simply.
+     * @returns {string} string representation of segments
      */
     toString() {
-        return this.transferToString()
+        return this.transferToString();
     }
 
     /**
-     * get sorted keys of 'segments' member.
-     * @returns a sorted keys of segments
+     * Get the first key in the segments tree.
+     * @returns {number} the first key
      */
-    sortedKeys() {
-        let keys = this.segments.keys()
-        let ks = Array.from(keys)
-        ks.sort()
-        return ks
+    getFirstKey() {
+        return this.segments.min().key;
     }
 
     /**
-     * get the left segment number for x from this.segments
-     * @param {*} x
-     * @returns the left segment number of the given.
+     * Get the last key in the segments tree.
+     * @returns {number} the last key
+     */
+    getLastKey() {
+        return this.segments.max().key;
+    }
+
+    /**
+     * Get the left segment node for x from this.segments.
+     * @param {number} x the key to find the left segment for
+     * @returns {{key: number, value: number}} the left segment node of the given key
      */
     getLeftKey(x) {
-        let l = -1
-        let keys = this.sortedKeys()
-        keys.forEach(k => {
-            if (k < x) {
-                l = k
+        let l = null;
+        this.segments.each((node) => {
+            if (node.key < x) {
+                l = node;
             }
-        })
-        return l
+        });
+        return l;
     }
 
     /**
-     * mergeKeys continous segments to together if they have same intensity
-     * @returns
+     * Merge continuous segments together if they have the same intensity.
      */
     mergeKeys() {
-        let keys = this.sortedKeys()
-        if (keys.length == 0) {
-            return
+        const nodes = [];
+        this.segments.each((node) => nodes.push(node));
+
+        // Remove leading zeros
+        let i = 0;
+        while (i < nodes.length && nodes[i].value === 0) {
+            this.segments.remove(nodes[i]);
+            i++;
         }
 
-        let i = 0
-        for (; i < keys.length && this.segments.get(keys[i]) == 0; i++) {
-            this.segments.delete(keys[i])
-        }
-        keys.splice(0, i)
-
-        for (i = keys.length - 1; i >= 0; i--) {
-            if (this.segments.get(keys[i]) == 0) {
-                if (i - 1 >= 0 && this.segments.get(keys[i - 1]) == 0) {
-                    this.segments.delete(keys[i])
-                    keys.splice(i, 1)
+        // Remove trailing zeros except the last zero if necessary
+        for (i = nodes.length - 1; i >= 0; i--) {
+            if (nodes[i].value === 0) {
+                if (i - 1 >= 0 && nodes[i - 1].value === 0) {
+                    this.segments.remove(nodes[i]);
                 }
             }
         }
 
-        let last
-        last = this.segments.get(keys[0])
-        for (let i = 1; i < keys.length; i++) {
-            if (this.segments.get(keys[i]) == last && last != 0) {
-                this.segments.delete(keys[i])
+        // Merge consecutive segments with the same non-zero value
+        let last = nodes[0].value;
+        for (i = 1; i < nodes.length; i++) {
+            if (nodes[i].value === last && last !== 0) {
+                this.segments.remove(nodes[i]);
             } else {
-                last = this.segments.get(keys[i])
-            }
-        }
-
-        last = 0
-        for (let i = keys.length - 2; i >= 0; i--) {
-            if (this.segments.get(keys[i]) == 0 && last == 0) {
-                this.segments.delete(keys[i])
-            } else {
-                last = this.segments.get(keys[i])
+                last = nodes[i].value;
             }
         }
     }
 
     /**
-     * transferToString return a string of simple format, i.e. [[20 1] [30 2] [40 0]]
-     * @returns
+     * TransferToString returns a string of simple format, i.e. [[20 1] [30 2] [40 0]].
+     * @returns {string} string representation of segments
      */
     transferToString() {
-        let keys = this.sortedKeys()
-        let rlt = []
-        keys.forEach(k => {
-            rlt.push(`[${k},${this.segments.get(k)}]`)
-        })
-
-        return `[${rlt.join(",")}]`
+        let rlt = "[";
+        this.segments.each((node) => {
+            rlt += `[${node.key},${node.value}],`;
+        });
+        // Remove the trailing comma if there are any segments
+        if (rlt.length > 1) {
+            rlt = rlt.slice(0, -1);
+        }
+        rlt += "]";
+        return rlt;
     }
 }

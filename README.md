@@ -1,2 +1,2 @@
 # intensity-segments
-project for intensitysegments
+project for intensity segments
